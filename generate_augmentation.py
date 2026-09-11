@@ -15,7 +15,12 @@ SQL_TO_QUESTION_SYSTEM = """你是中文Text-to-SQL训练数据标注员。根�
 
 QUESTION_TO_SQL_SYSTEM = """你是中文Text-to-SQL训练数据生成员。参考原始样本的语言风格，为同一张表创造一个不同意图的新问题和匹配的SQLite SQL。
 只能使用Schema中的字段和值；问题与SQL必须逐项对应；不要复制原问题；只允许单表SELECT；不得使用子查询或JOIN。
+SQL中每个表名和字段名都必须用反引号包围，尤其是5G网络支持、百分号等特殊字段；数值条件不得加引号；布尔字段只能使用'是'或'否'。
 只输出JSON：{"query":"...","sql":"SELECT ..."}。"""
+
+SEMANTIC_REVIEW_SYSTEM = """你是Text-to-SQL训练数据质检员。检查中文问题与SQL是否严格等价。
+逐项检查SELECT字段、WHERE条件和值、AND/OR作用域、聚合、分组、排序和LIMIT；也检查SQL是否包含重复字段或不合理字段值。
+不要修复内容。只输出JSON：{"consistent":true或false,"issues":["问题"]}。"""
 
 
 def parser():
@@ -31,6 +36,7 @@ def parser():
     result.add_argument("--timeout", type=float, default=120)
     result.add_argument("--seed", type=int, default=20260910)
     result.add_argument("--max-attempts", type=int, default=10000)
+    result.add_argument("--skip-semantic-review", action="store_true")
     result.add_argument("--resume", action="store_true")
     return result
 
@@ -88,7 +94,7 @@ def main():
         try:
             if direction == "sql_to_question":
                 sql, mutation = mutate_sql(seed["sql"], table, catalog[table], rng)
-                sql = validate_sql(sql, catalog, table)
+                sql = validate_sql(sql, catalog, table, strict_types=True)
                 response = client.ask_json(
                     SQL_TO_QUESTION_SYSTEM,
                     schema_text(table, catalog[table], sql) + f"\nSQL：{sql}",
@@ -102,13 +108,23 @@ def main():
                     + f"\n原始问题：{seed['query']}\n原始SQL：{seed['sql']}",
                 )
                 query, sql = str(response["query"]).strip(), str(response["sql"]).strip()
-                sql = validate_sql(sql, catalog, table)
+                sql = validate_sql(sql, catalog, table, strict_types=True)
             if len(query) < 8 or query == seed["query"] or "SELECT " in query.upper():
                 raise ValueError("invalid or copied query")
             if query in seen_queries:
                 raise ValueError("duplicate query")
             if sql in seen_sql:
                 raise ValueError("duplicate SQL")
+            review = {"consistent": None, "issues": [], "skipped": True}
+            if not args.skip_semantic_review:
+                review = client.ask_json(
+                    SEMANTIC_REVIEW_SYSTEM,
+                    schema_text(table, catalog[table], sql) + f"\n问题：{query}\nSQL：{sql}",
+                    max_tokens=400,
+                    temperature=0,
+                )
+                if review.get("consistent") is not True:
+                    raise ValueError(f"semantic review rejected pair: {review.get('issues', [])}")
             row = {
                 "augmentation_id": augmentation_id,
                 "query": query,
@@ -117,7 +133,12 @@ def main():
                 "source": direction,
                 "parent_id": seed["id"],
                 "mutation": mutation,
-                "validated": {"sqlglot": True, "schema": True, "database_execution": False},
+                "validated": {
+                    "sqlglot": True, "schema": True, "type_rules": True,
+                    "teacher_semantic_review": not args.skip_semantic_review,
+                    "database_execution": False,
+                },
+                "semantic_review": review,
             }
             append_jsonl(augmentation_file, row)
             completed.append(row)

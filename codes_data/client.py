@@ -8,14 +8,14 @@ class ChatClient:
         self.model = model
         self.timeout = timeout
 
-    def ask_json(self, system, user, max_tokens=700):
+    def ask_json(self, system, user, max_tokens=700, temperature=0.7):
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": 0.7,
+            "temperature": temperature,
             "top_p": 0.9,
             "max_tokens": max_tokens,
             "chat_template_kwargs": {"enable_thinking": False},
@@ -34,4 +34,3 @@ class ChatClient:
         if start < 0 or end < start:
             raise ValueError("model did not return a JSON object")
         return json.loads(content[start:end + 1])
-
