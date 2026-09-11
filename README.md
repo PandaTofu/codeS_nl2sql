@@ -21,3 +21,7 @@
 ## 训练前审计
 
 使用 `audit_dataset.py` 检查重复样本、SQL结构、Schema、字段类型和值域。语义审查由生成阶段的第二次教师模型请求完成，但它仍不等于人工标注或数据库执行验证。
+
+## Query-only CodeS-3B 基线
+
+`train_query_only_qlora.py` 使用固定提示词和 Query 直接监督生成 SQL，不把 Schema 放入训练输入。训练只计算 SQL Token 的损失，并以人工原始样本60%、SQL驱动增强30%、问题驱动增强10%的比例加权采样。每个 Epoch 在隔离的人工验证集上评估，最终保存验证损失最低的 Adapter。
