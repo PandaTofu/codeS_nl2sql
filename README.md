@@ -31,3 +31,5 @@
 `build_hard_training_set.py` 根据训练集回放报告重复错误样本和复杂 SQL 结构，不读取隔离验证集。`train_query_only_qlora.py --adapter` 从现有 Adapter 继续训练。
 
 `augment_validation_queries.py` 为160条验证样本各生成2条经教师审查的等价Query，单独保存320条增强数据，并与第二轮困难训练集合并。该流程会产生验证集泄漏，后续在原160条上的评估不再代表独立泛化能力。
+
+`rewrite_manual_queries.py` 对1000条人工原始样本做经教师审查的轻量Query同义改写，保持ID和SQL不变；随后将第一轮合并训练集中的840条 `manual_original` 替换为对应改写版。旧训练集缺少ID时，使用原始Query和SQL唯一反查ID。
