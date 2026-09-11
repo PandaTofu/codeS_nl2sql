@@ -1,0 +1,6 @@
+*
+!docker_build/
+!docker_build/**
+!models/
+!models/CodeS-3B-NL2SQL-Merged/
+!models/CodeS-3B-NL2SQL-Merged/**

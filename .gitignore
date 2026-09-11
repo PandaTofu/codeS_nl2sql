@@ -1,6 +1,7 @@
 data/
 outputs/
 training/
+models/
 .venv/
 __pycache__/
 *.py[cod]

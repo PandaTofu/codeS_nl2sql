@@ -1,0 +1,21 @@
+{
+  "service": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "max_batch_size": 32
+  },
+  "model": {
+    "path": "/app/model",
+    "dtype": "bfloat16",
+    "gpu_memory_utilization": 0.9,
+    "max_model_len": 2048,
+    "max_num_seqs": 16,
+    "max_sql_tokens": 512
+  },
+  "timeouts": {
+    "predict_seconds": 6.0
+  },
+  "fallback": {
+    "sql": "SELECT 1 AS result"
+  }
+}
