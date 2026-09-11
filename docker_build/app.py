@@ -36,6 +36,13 @@ def load_config():
 CONFIG = load_config()
 ENGINE = None
 STARTUP_ERROR = None
+READY = False
+
+
+WARMUP_QUESTIONS = (
+    "查询处理器品牌为Intel的台式机",
+    "查询三星手机的型号",
+)
 
 
 def initialize_engine():
@@ -54,23 +61,6 @@ def initialize_engine():
         trust_remote_code=True,
     )
     return AsyncLLMEngine.from_engine_args(args)
-
-
-@asynccontextmanager
-async def lifespan(_):
-    global ENGINE, STARTUP_ERROR
-    try:
-        ENGINE = initialize_engine()
-        STARTUP_ERROR = None
-        print(json.dumps({"event": "model_ready", "model": CONFIG["model"]["path"]}), flush=True)
-    except Exception as exc:
-        ENGINE = None
-        STARTUP_ERROR = f"{type(exc).__name__}: {exc}"
-        print(json.dumps({"event": "model_startup_failed", "error": STARTUP_ERROR}), flush=True)
-    yield
-
-
-app = FastAPI(title="CodeS NL2SQL Competition API", lifespan=lifespan)
 
 
 def clean_sql(text):
@@ -143,7 +133,7 @@ async def abort_request(request_id):
         pass
 
 
-async def generate_sql(question):
+async def run_generation(question, timeout=None):
     if ENGINE is None:
         raise RuntimeError("model is unavailable")
     from vllm import SamplingParams
@@ -157,7 +147,7 @@ async def generate_sql(question):
     output = None
     completed = False
     try:
-        async with asyncio.timeout(CONFIG["timeouts"]["predict_seconds"]):
+        async with asyncio.timeout(timeout):
             async for item in ENGINE.generate(
                 PROMPT_TEMPLATE.format(query=question), params, request_id
             ):
@@ -169,6 +159,52 @@ async def generate_sql(question):
     finally:
         if not completed:
             await abort_request(request_id)
+
+
+async def warmup_engine():
+    started = time.perf_counter()
+    print(json.dumps({"event": "model_warmup_started"}), flush=True)
+    for index, question in enumerate(WARMUP_QUESTIONS, start=1):
+        sample_started = time.perf_counter()
+        await run_generation(question, timeout=120.0)
+        print(json.dumps({
+            "event": "model_warmup_sample",
+            "index": index,
+            "seconds": round(time.perf_counter() - sample_started, 4),
+        }), flush=True)
+    print(json.dumps({
+        "event": "model_warmup_completed",
+        "samples": len(WARMUP_QUESTIONS),
+        "seconds": round(time.perf_counter() - started, 4),
+    }), flush=True)
+
+
+async def generate_sql(question):
+    return await run_generation(
+        question,
+        timeout=CONFIG["timeouts"]["predict_seconds"],
+    )
+
+
+@asynccontextmanager
+async def lifespan(_):
+    global ENGINE, STARTUP_ERROR, READY
+    READY = False
+    try:
+        ENGINE = initialize_engine()
+        await warmup_engine()
+        STARTUP_ERROR = None
+        READY = True
+        print(json.dumps({"event": "model_ready", "model": CONFIG["model"]["path"]}), flush=True)
+    except Exception as exc:
+        ENGINE = None
+        READY = False
+        STARTUP_ERROR = f"{type(exc).__name__}: {exc}"
+        print(json.dumps({"event": "model_startup_failed", "error": STARTUP_ERROR}), flush=True)
+    yield
+
+
+app = FastAPI(title="CodeS NL2SQL Competition API", lifespan=lifespan)
 
 
 async def predict_one(item):
@@ -206,7 +242,7 @@ async def predict_one(item):
 async def health():
     return JSONResponse({
         "status": "ok",
-        "ready": ENGINE is not None,
+        "ready": READY,
         "error": STARTUP_ERROR,
     }, status_code=200)
 
