@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 import torch
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import Dataset, WeightedRandomSampler
 from transformers import (
     AutoModelForCausalLM,
@@ -152,6 +152,7 @@ def training_arguments(args):
 def main():
     parser = argparse.ArgumentParser(description="Query-only CodeS-3B QLoRA baseline")
     parser.add_argument("--model", default="/home/ubuntu/models/CodeS-3B")
+    parser.add_argument("--adapter", type=Path)
     parser.add_argument("--train", default="outputs/augmentation_v2/codes_sft_train.jsonl", type=Path)
     parser.add_argument("--validation", default="outputs/augmentation_v2/manual_validation.jsonl", type=Path)
     parser.add_argument("--output", default="training/query_only_codes3b_v1", type=Path)
@@ -171,7 +172,7 @@ def main():
     if not torch.cuda.is_bf16_supported():
         parser.error("GPU does not support BF16")
     args.output.mkdir(parents=True, exist_ok=True)
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.adapter or args.model, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
     tokenizer.padding_side = "right"
     train_dataset = QueryOnlyDataset(args.train, tokenizer, args.max_length)
@@ -193,15 +194,18 @@ def main():
     if architecture != "gpt_bigcode":
         parser.error(f"expected GPTBigCode/CodeS model, got model_type={architecture}")
     model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-    model = get_peft_model(model, LoraConfig(
-        r=32,
-        lora_alpha=64,
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=["c_attn", "c_proj", "c_fc"],
-        fan_in_fan_out=True,
-    ))
+    if args.adapter:
+        model = PeftModel.from_pretrained(model, args.adapter, is_trainable=True)
+    else:
+        model = get_peft_model(model, LoraConfig(
+            r=32,
+            lora_alpha=64,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=["c_attn", "c_proj", "c_fc"],
+            fan_in_fan_out=True,
+        ))
     model.config.use_cache = False
     model.print_trainable_parameters()
     source_counts = Counter(train_dataset.sources)
@@ -209,6 +213,7 @@ def main():
         "mode": "query_only",
         "schema_in_prompt": False,
         "model": args.model,
+        "initial_adapter": str(args.adapter) if args.adapter else None,
         "model_type": architecture,
         "train_file": str(args.train),
         "validation_file": str(args.validation),
