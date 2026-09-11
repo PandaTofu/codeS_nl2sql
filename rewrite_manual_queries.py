@@ -8,14 +8,15 @@ from codes_data.client import ChatClient
 from codes_data.io import append_jsonl, read_jsonl, stable_key
 
 
-REWRITE_SYSTEM = """你是中文Text-to-SQL数据标注员。对用户问题做一次轻量同义改写，语义必须与原问题和SQL完全一致。
+REWRITE_SYSTEM = """你是中文数据标注员。对用户问题做一次轻量同义改写，语义必须与原问题完全一致。
 可以替换同义词、调整语序或句式，但必须原样保留品牌、型号、专有名词、枚举值、数字、日期、单位、比较边界、查询字段、AND/OR关系、聚合、分组、排序和数量限制。
 不得增加或删除任何要求，不得在问题中出现SQL、表名或下划线字段名。改写后不得与原文完全相同。
 只输出JSON：{"query":"改写后的问题"}。
 """.strip()
 
-REVIEW_SYSTEM = """你是Text-to-SQL语义质检员。判断改写问题是否与原始问题及SQL严格等价。
-任何字段、条件、值、比较边界、AND/OR作用域、聚合、分组、排序或LIMIT被遗漏、新增或改变时，consistent必须为false。
+REVIEW_SYSTEM = """你是中文语义质检员。只判断改写问题与原始问题是否严格等价，不要推测或补充原问题没有明说的需求。
+任何查询内容、条件、值、比较边界、AND/OR作用域、聚合、分组、排序或数量限制被遗漏、新增或改变时，consistent必须为false。
+“详细信息”、“全部配置”等概括表达在改写后保持原意即可，不得因为它没有枚举具体字段而判错。
 只输出JSON：{"consistent":true或false,"issues":["问题"]}。
 """.strip()
 
@@ -75,7 +76,7 @@ def main():
             try:
                 response = client.ask_json(
                     REWRITE_SYSTEM,
-                    f"原始问题：{seed['query']}\nSQL：{seed['sql']}",
+                    f"原始问题：{seed['query']}",
                     max_tokens=700,
                     temperature=0.7,
                 )
@@ -88,7 +89,7 @@ def main():
                 if not args.skip_review:
                     review = client.ask_json(
                         REVIEW_SYSTEM,
-                        f"原始问题：{seed['query']}\n改写问题：{query}\nSQL：{seed['sql']}",
+                        f"原始问题：{seed['query']}\n改写问题：{query}",
                         max_tokens=400,
                         temperature=0,
                     )
