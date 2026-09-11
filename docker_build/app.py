@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 
-PROMPT_TEMPLATE = """将下面的中文问题转换为一条MySQL只读SQL。只输出SQL，不要解释或Markdown。
+PROMPT_TEMPLATE = """将下面的中文问题转换为一条MySQL只读SQL。只输出SQL，不要解释或Markdown。表名和字段名不要使用双引号；如需引用标识符请使用MySQL反引号，字符串值只使用单引号。
 ### Question
 {query}
 ### SQL
@@ -63,6 +63,59 @@ def initialize_engine():
     return AsyncLLMEngine.from_engine_args(args)
 
 
+def normalize_mysql_identifier_quotes(sql):
+    """Convert double-quoted identifiers outside string literals to backticks."""
+    result = []
+    index = 0
+    length = len(sql)
+    while index < length:
+        char = sql[index]
+        if char == "'":
+            start = index
+            index += 1
+            while index < length:
+                if sql[index] != "'":
+                    index += 1
+                    continue
+                if index + 1 < length and sql[index + 1] == "'":
+                    index += 2
+                    continue
+                index += 1
+                break
+            result.append(sql[start:index])
+            continue
+        if char == '"':
+            index += 1
+            identifier = []
+            while index < length:
+                if sql[index] != '"':
+                    identifier.append(sql[index])
+                    index += 1
+                    continue
+                if index + 1 < length and sql[index + 1] == '"':
+                    identifier.append('"')
+                    index += 2
+                    continue
+                index += 1
+                break
+            content = "".join(identifier)
+            prefix = "".join(result).rstrip()
+            value_context = (
+                re.search(r"(?:=|<>|!=|<=|>=|<|>|\bLIKE|\bREGEXP|\bRLIKE|\bIS)\s*$", prefix, re.I)
+                or re.search(r"\b(?:NOT\s+)?IN\s*\([^)]*$", prefix, re.I)
+                or re.search(r"\bBETWEEN\s*$", prefix, re.I)
+                or re.search(r"\bBETWEEN\b[^;]*\bAND\s*$", prefix, re.I)
+            )
+            if value_context:
+                result.append("'" + content.replace("'", "''") + "'")
+            else:
+                result.append("`" + content.replace("`", "``") + "`")
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
 def clean_sql(text):
     value = str(text).strip()
     fenced = re.search(r"```(?:sql)?\s*(.*?)```", value, re.IGNORECASE | re.DOTALL)
@@ -72,6 +125,7 @@ def clean_sql(text):
     if match:
         value = match.group(0)
     value = value.split("\n\n", 1)[0].strip().rstrip(";").strip()
+    value = normalize_mysql_identifier_quotes(value)
     without_literals = re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"", " ", value)
     forbidden = r"\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|CALL|GRANT|REVOKE|SET|USE|LOAD|OUTFILE|INTO)\b"
     if not re.match(r"^\s*(?:SELECT|WITH)\b", without_literals, re.IGNORECASE):
