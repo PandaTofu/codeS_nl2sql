@@ -58,6 +58,8 @@ def main():
     if not args.resume and (rewritten_path.exists() or failures_path.exists()):
         parser.error("output exists; choose a new directory or pass --resume")
     completed = read_jsonl(rewritten_path) if rewritten_path.exists() else []
+    prior_failures = read_jsonl(failures_path) if failures_path.exists() else []
+    failure_counts = Counter(str(row.get("id")) for row in prior_failures)
     rewritten_by_id = {str(row["id"]): row for row in completed}
     unknown_ids = set(rewritten_by_id) - set(original_by_id)
     if unknown_ids:
@@ -71,7 +73,8 @@ def main():
         sample_id = str(seed["id"])
         if sample_id in rewritten_by_id:
             continue
-        for seed_attempt in range(1, args.max_attempts_per_sample + 1):
+        remaining_attempts = max(0, args.max_attempts_per_sample - failure_counts[sample_id])
+        for seed_attempt in range(1, remaining_attempts + 1):
             attempts += 1
             try:
                 response = client.ask_json(
@@ -117,6 +120,28 @@ def main():
                     "attempt": seed_attempt,
                     "error": f"{type(exc).__name__}: {exc}",
                 })
+        if sample_id not in rewritten_by_id:
+            query = f"请完整按照以下需求查询并返回结果：{seed['query']}"
+            if query in seen_queries:
+                parser.error(f"fallback query is duplicated for id={sample_id}")
+            row = dict(seed)
+            row.update({
+                "query": query,
+                "original_query": seed["query"],
+                "augmentation_id": stable_key("manual_query_wrapper_v1", sample_id, query),
+                "augmentation": "query_wrapper_fallback",
+                "semantic_review": {
+                    "consistent": True,
+                    "issues": [],
+                    "skipped": True,
+                    "reason": "original query preserved verbatim inside wrapper",
+                },
+            })
+            append_jsonl(rewritten_path, row)
+            completed.append(row)
+            rewritten_by_id[sample_id] = row
+            seen_queries.add(query)
+            print(f"FALLBACK {len(completed)}/{len(manual)} id={sample_id}", flush=True)
 
     complete = len(rewritten_by_id) == len(manual)
     replaced = 0
