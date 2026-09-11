@@ -25,3 +25,5 @@
 ## Query-only CodeS-3B 基线
 
 `train_query_only_qlora.py` 使用固定提示词和 Query 直接监督生成 SQL，不把 Schema 放入训练输入。训练只计算 SQL Token 的损失，并以人工原始样本60%、SQL驱动增强30%、问题驱动增强10%的比例加权采样。每个 Epoch 在隔离的人工验证集上评估，最终保存验证损失最低的 Adapter。
+
+`evaluate_query_only_adapter.py` 在隔离验证集上执行确定性推理，使用已验证的 MySQL SQL 分层规则评分，输出严格 EM、规则满分率、平均规则分、静态有效率和推理耗时。
