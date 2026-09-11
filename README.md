@@ -29,3 +29,5 @@
 `evaluate_query_only_adapter.py` 在隔离验证集上执行确定性推理，使用已验证的 MySQL SQL 分层规则评分，输出严格 EM、规则满分率、平均规则分、静态有效率和推理耗时。
 
 `build_hard_training_set.py` 根据训练集回放报告重复错误样本和复杂 SQL 结构，不读取隔离验证集。`train_query_only_qlora.py --adapter` 从现有 Adapter 继续训练。
+
+`augment_validation_queries.py` 为160条验证样本各生成2条经教师审查的等价Query，单独保存320条增强数据，并与第二轮困难训练集合并。该流程会产生验证集泄漏，后续在原160条上的评估不再代表独立泛化能力。
