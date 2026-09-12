@@ -61,13 +61,20 @@ def main():
     parser.add_argument("--output", default="reports/query_only_codes3b_v1", type=Path)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--limit", type=int,
+                        help="Evaluate only the first N validation samples")
     parser.add_argument("--prompt-mode", choices=("query-only", "query-schema"),
                         default="query-only")
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
         parser.error("CUDA is unavailable")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be greater than 0")
     rows = list(read_jsonl(args.validation))
+    source_samples = len(rows)
+    if args.limit is not None:
+        rows = rows[:args.limit]
     if not rows:
         parser.error(f"validation set is empty: {args.validation}")
     if args.prompt_mode == "query-schema":
@@ -159,6 +166,8 @@ def main():
         "adapter": None if args.merged_model else args.adapter,
         "merged_model": args.merged_model,
         "validation": str(args.validation),
+        "validation_source_samples": source_samples,
+        "limit": args.limit,
         "prompt_mode": args.prompt_mode,
     }
     with (args.output / "predictions.jsonl").open("w", encoding="utf-8") as handle:
