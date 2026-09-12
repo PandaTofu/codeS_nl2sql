@@ -87,3 +87,15 @@ python docker_build/merge_adapter.py \
 ```
 
 下一阶段以 `models/CodeS-3B-Schema-v1` 为基础模型，使用 Query→SQL 数据重新训练新的 NL2SQL Adapter；不要覆盖现有 Query-only 基线。
+
+## Query + Schema 直接监督实验
+
+`build_query_schema_dataset.py` 可直接复用陈老师方案生成的
+`lora1_domain_corpus.jsonl`，将每个 Query-SQL 样本组装成 `Query + 相关完整表Schema -> SQL`。
+表名由训练标签 SQL 提取；输入包含该表的全部 `schema_chunk`。默认不只突出
+Gold SQL 已用字段，避免在训练 Prompt 中泄露目标字段集。只有在推理端同样具备
+高可靠字段检索器时，才建议使用 `--include-used-field-constraints` 附加已用字段的详细约束。
+
+`train_query_schema_qlora.py` 从原始 CodeS-3B 开始 QLoRA，Prompt 部分的 label
+全部屏蔽，只对 SQL token 计算损失。训练集和验证集必须分别构建，
+不要用验证集参与训练。
