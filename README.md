@@ -33,3 +33,23 @@
 `augment_validation_queries.py` 为160条验证样本各生成2条经教师审查的等价Query，单独保存320条增强数据，并与第二轮困难训练集合并。该流程会产生验证集泄漏，后续在原160条上的评估不再代表独立泛化能力。
 
 `rewrite_manual_queries.py` 对1000条人工原始样本做经教师审查的轻量Query同义改写，保持ID和SQL不变；随后将第一轮合并训练集中的840条 `manual_original` 替换为对应改写版。旧训练集缺少ID时，使用原始Query和SQL唯一反查ID。
+
+## 表路由与 Schema Linker 监督数据
+
+`build_schema_supervision.py` 使用 SQLGlot 从带标准 SQL 的样本中提取物理表、字段及其 SELECT/FILTER/GROUP/HAVING/ORDER/JOIN 角色。它输出表路由样本、字段角色样本，以及适合训练字段相关性二分类器的正负候选对。
+
+推荐保留 `round1_val.jsonl` 为显式验证来源：
+
+```bash
+python build_schema_supervision.py \
+  --input data/manual_raw_train.jsonl \
+  --input data/round1_test.jsonl \
+  --validation-input data/round1_val.jsonl \
+  --schema data/schema_catalog.json \
+  --output-dir training/schema_supervision_v1 \
+  --hard-negatives 2 \
+  --random-negatives 2 \
+  --seed 42
+```
+
+若三个文件都作为同一数据池，则省略 `--validation-input`，将它也作为 `--input`；脚本会按规范化 Query 的稳定哈希划分15%验证集，确保完全相同的 Query 不会跨集合。
