@@ -99,3 +99,6 @@ Gold SQL 已用字段，避免在训练 Prompt 中泄露目标字段集。只有
 `train_query_schema_qlora.py` 从原始 CodeS-3B 开始 QLoRA，Prompt 部分的 label
 全部屏蔽，只对 SQL token 计算损失。训练集和验证集必须分别构建，
 不要用验证集参与训练。
+
+评估时先用同一构建器给验证样本附加Schema，再使用
+`evaluate_query_only_adapter.py --prompt-mode query-schema`，保证训练与推理Prompt完全一致。

@@ -10,7 +10,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from codes_data.io import read_jsonl
 from codes_data.official_like_metric import compare_sql
-from train_query_only_qlora import PROMPT_TEMPLATE
+from train_query_only_qlora import PROMPT_TEMPLATE as QUERY_ONLY_PROMPT
+from train_query_schema_qlora import PROMPT_TEMPLATE as QUERY_SCHEMA_PROMPT
 
 
 def clean_sql(text):
@@ -51,13 +52,15 @@ def batches(items, size):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate query-only CodeS adapter")
+    parser = argparse.ArgumentParser(description="Evaluate query-only or Query+Schema CodeS adapter")
     parser.add_argument("--model", default="/home/ubuntu/models/CodeS-3B")
     parser.add_argument("--adapter", default="training/query_only_codes3b_v1/best_adapter")
     parser.add_argument("--validation", default="outputs/augmentation_v2/manual_validation.jsonl", type=Path)
     parser.add_argument("--output", default="reports/query_only_codes3b_v1", type=Path)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--prompt-mode", choices=("query-only", "query-schema"),
+                        default="query-only")
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
@@ -65,6 +68,12 @@ def main():
     rows = list(read_jsonl(args.validation))
     if not rows:
         parser.error(f"validation set is empty: {args.validation}")
+    if args.prompt_mode == "query-schema":
+        missing_schema = [index for index, row in enumerate(rows) if not str(row.get("schema") or "").strip()]
+        if missing_schema:
+            parser.error(
+                f"query-schema mode requires schema in every row; missing at indexes {missing_schema[:10]}"
+            )
     args.output.mkdir(parents=True, exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(args.adapter, trust_remote_code=True)
@@ -88,7 +97,13 @@ def main():
     predictions = []
     started = time.perf_counter()
     for chunk in batches(rows, args.batch_size):
-        prompts = [PROMPT_TEMPLATE.format(query=str(row["query"]).strip()) for row in chunk]
+        if args.prompt_mode == "query-schema":
+            prompts = [QUERY_SCHEMA_PROMPT.format(
+                schema=str(row["schema"]).strip(),
+                query=str(row["query"]).strip(),
+            ) for row in chunk]
+        else:
+            prompts = [QUERY_ONLY_PROMPT.format(query=str(row["query"]).strip()) for row in chunk]
         inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
         batch_started = time.perf_counter()
         with torch.inference_mode():
@@ -139,6 +154,7 @@ def main():
         "model": args.model,
         "adapter": args.adapter,
         "validation": str(args.validation),
+        "prompt_mode": args.prompt_mode,
     }
     with (args.output / "predictions.jsonl").open("w", encoding="utf-8") as handle:
         for item in predictions:
