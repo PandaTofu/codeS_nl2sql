@@ -55,6 +55,8 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate query-only or Query+Schema CodeS adapter")
     parser.add_argument("--model", default="/home/ubuntu/models/CodeS-3B")
     parser.add_argument("--adapter", default="training/query_only_codes3b_v1/best_adapter")
+    parser.add_argument("--merged-model", action="store_true",
+                        help="model路径已包含合并后权重，不再加载Adapter")
     parser.add_argument("--validation", default="outputs/augmentation_v2/manual_validation.jsonl", type=Path)
     parser.add_argument("--output", default="reports/query_only_codes3b_v1", type=Path)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -76,7 +78,8 @@ def main():
             )
     args.output.mkdir(parents=True, exist_ok=True)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.adapter, trust_remote_code=True)
+    tokenizer_source = args.model if args.merged_model else args.adapter
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
     tokenizer.padding_side = "left"
     model = AutoModelForCausalLM.from_pretrained(
@@ -91,7 +94,8 @@ def main():
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
     )
-    model = PeftModel.from_pretrained(model, args.adapter)
+    if not args.merged_model:
+        model = PeftModel.from_pretrained(model, args.adapter)
     model.eval()
 
     predictions = []
@@ -152,7 +156,8 @@ def main():
         "p50_generation_latency_seconds": percentile(0.5),
         "p95_generation_latency_seconds": percentile(0.95),
         "model": args.model,
-        "adapter": args.adapter,
+        "adapter": None if args.merged_model else args.adapter,
+        "merged_model": args.merged_model,
         "validation": str(args.validation),
         "prompt_mode": args.prompt_mode,
     }
