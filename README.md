@@ -102,3 +102,6 @@ Gold SQL 已用字段，避免在训练 Prompt 中泄露目标字段集。只有
 
 评估时先用同一构建器给验证样本附加Schema，再使用
 `evaluate_query_only_adapter.py --prompt-mode query-schema`，保证训练与推理Prompt完全一致。
+也可使用独立入口 `evaluate_query_schema_adapter.py`：它接受原始 `query/sql`
+验证集，根据 Gold SQL 只确定相关表，自动从陈老师 Schema 语料附加该表的
+完整字段 Schema。因此这个评估测量的是“表路由正确”条件下的 SQL 生成能力。
