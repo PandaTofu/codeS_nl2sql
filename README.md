@@ -53,3 +53,37 @@ python build_schema_supervision.py \
 ```
 
 若三个文件都作为同一数据池，则省略 `--validation-input`，将它也作为 `--input`；脚本会按规范化 Query 的稳定哈希划分15%验证集，确保完全相同的 Query 不会跨集合。
+
+## 固定 Schema 领域训练
+
+`build_schema_domain_corpus.py` 把13张表的表用途、字段分组、字段类型、描述、枚举值和关联表共同字段转换为短篇领域语料。`train_schema_qlora.py` 在原始 CodeS-3B 上执行领域 CLM QLoRA；该阶段不训练 Query→SQL，也不应从现有 NL2SQL Adapter 继续训练。
+
+```bash
+python build_schema_domain_corpus.py \
+  --schema data/schema_catalog.json \
+  --output-dir training/schema_domain_v1 \
+  --chunk-size 10
+
+python train_schema_qlora.py \
+  --model /home/ubuntu/models/CodeS-3B \
+  --train training/schema_domain_v1/schema_train.jsonl \
+  --validation training/schema_domain_v1/schema_validation.jsonl \
+  --output training/codes3b_schema_qlora_v1 \
+  --epochs 2 \
+  --max-length 384 \
+  --batch-size 2 \
+  --eval-batch-size 4 \
+  --gradient-accumulation 8 \
+  --learning-rate 5e-5
+```
+
+训练结束后把领域 Adapter 合并为中间模型：
+
+```bash
+python docker_build/merge_adapter.py \
+  --base /home/ubuntu/models/CodeS-3B \
+  --adapter training/codes3b_schema_qlora_v1/best_adapter \
+  --output models/CodeS-3B-Schema-v1
+```
+
+下一阶段以 `models/CodeS-3B-Schema-v1` 为基础模型，使用 Query→SQL 数据重新训练新的 NL2SQL Adapter；不要覆盖现有 Query-only 基线。
